@@ -1,0 +1,126 @@
+#!/usr/bin/env bash
+### gtui - Generalized Text User Interface ###
+
+items="${1:-}" binds="${2:-}"
+
+# Convert items and keybindings to arrays
+IFS=$'\n' read -rd '' -a items_array <<<"$items"
+IFS=$'\n' read -rd '' -a binds_array <<<"$binds"
+
+# Initialize keybindings and friendly names
+declare -A key_bindings friendly_names
+for bind in "${binds_array[@]}"; do
+    key=$(echo "$bind" | awk '{print $1}')
+    cmd=$(echo "$bind" | awk '{print $2}')
+    friendly_name=$(echo "$bind" | awk '{$1=$2=""; sub(/^ +/, ""); print}')
+
+    case "$key" in
+        'Return') key=$'\n' ;;
+        'Backspace') key=$'\177' ;;  # ASCII DEL character
+        'Space') key=$' ' ;;
+        'Tab') key=$'\t' ;;
+    esac
+
+    key_bindings["$key"]="$cmd"
+    [[ -n "$friendly_name" ]] && friendly_names["$key"]="$friendly_name"
+done
+
+# Terminal control functions
+clear_screen() { printf '\e[2J\e[H'; }
+hide_cursor() { printf '\e[?25l'; }
+show_cursor() { printf '\e[?25h'; }
+reset_terminal() { printf '\e[m\e[?25h\e[2J\e[H'; stty "$saved_stty"; }
+set_cursor_position() { printf '\e[%s;%sH' "$1" "${2:-1}"; }
+
+# Screen refresh and drawing
+refresh_screen() {
+    clear_screen
+    hide_cursor
+    shopt -s checkwinsize; (:)
+    [[ -z "$LINES" ]] && read -r LINES COLUMNS < <(stty size)
+    visible_count=$((LINES - 2))
+    total_items=${#items_array[@]}
+    draw_items
+}
+
+draw_items() {
+    # Draw the items list
+    for ((i = 0; i < visible_count && i + scroll_index < total_items; i++)); do
+        set_cursor_position $((i + 1))
+        if (( i == selected )); then
+            printf '\e[7m\e[K%s\e[m\n' "${items_array[i + scroll_index]}"
+        else
+            printf '\e[K%s\n' "${items_array[i + scroll_index]}"
+        fi
+    done
+
+    # Clear remaining lines if any
+    for ((; i < visible_count; i++)); do
+        set_cursor_position $((i + 1)); printf '\e[K'
+    done
+
+    # Print status line with friendly names
+    set_cursor_position "$((LINES - 1))"
+    local status=""
+    for key in "${!friendly_names[@]}"; do
+        status+=" ${friendly_names[$key]}"
+    done
+
+    printf '\e[2m%s\e[m' "$status"
+    set_cursor_position 1 1
+}
+
+# Interactive functions
+scroll_down() {
+    if ((selected < visible_count - 1 && scroll_index + selected < total_items - 1)); then
+        ((selected++))
+    elif ((scroll_index + visible_count < total_items)); then
+        ((scroll_index++))
+    fi
+}
+
+scroll_up() {
+    if ((selected > 0)); then
+        ((selected--))
+    elif ((scroll_index > 0)); then
+        ((scroll_index--))
+    fi
+}
+
+select_item() {
+    echo "Selected: ${items_array[scroll_index + selected]}"
+    read -rsp $'Press any key to continue...\n'
+}
+
+quit() {
+    reset_terminal
+    exit 0
+}
+
+handle_input() {
+    local input="$1"
+    local cmd=${key_bindings["$input"]}
+    [[ -n $cmd ]] && $cmd
+}
+
+main() {
+    clear_screen
+    hide_cursor
+    refresh_screen
+    selected=0
+    scroll_index=0
+
+    # Save terminal state and set traps
+    saved_stty=$(stty -g)
+    trap 'reset_terminal' EXIT
+    trap 'refresh_screen' SIGWINCH
+
+    while :; do
+        read -rsN1 input
+        [[ $input == $'\e' ]] && read -rsN2 -t0.01 rest_input && input+="$rest_input"  # Handle escape sequences if necessary
+        handle_input "$input"
+        draw_items
+    done
+}
+
+main
