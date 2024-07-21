@@ -1,8 +1,11 @@
 # gtui - generalized text user interface
 
-# Example script that calls gtui
+put gtui in your $PATH and make it executable
 
-# Define items (you could read these from a file)
+Example script that uses gtui:
+```bash
+# Define items (you could read these from a file):
+
 items=$(cat <<EOF
 apples 4
 oranges 2
@@ -23,3 +26,4 @@ EOF
 
 # Call gtui with the defined items and keybindings
 ./gtui "$items" "$binds"
+```
